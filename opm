@@ -1,0 +1,253 @@
+#!/usr/bin/ruby
+
+require "yaml"
+require "json"
+
+$gh_mirror_htm = "https://hub.fastgit.org"
+$gh_mirror_dl = "https://github.com.cnpmjs.org"
+
+$plugins_list = JSON.parse(File.read "./obsidian-releases/community-plugins.json")
+$dl_tool = ["curl", "axel"]
+
+def get_plugins_list()
+  system %q|mkdir -p ./.plugin_backup/data/#{Time.new().to_s.split(\" \")[0]}/|
+  system %q|mv ./obsidian-releases/ ./.plugin_backup/data/#{Time.new().to_s.split(" ")[0]}|
+  `git clone #{$gh_mirror_dl}/obsidianmd/obsidian-releases.git`
+end
+
+def find_repo(id)
+  for i in $plugins_list
+    if i["id"] == id
+      return i["repo"]
+    end
+  end
+  return "err:repo_not_found"
+end
+
+def find_id(repo)
+  for i in $plugins_list
+    if i["repo"] == repo
+      return i["id"]
+    end
+  end
+  return "err:id_not_found"
+end
+
+def find_ver(verf, verc)
+  for i in verf
+    if i[1] == verc
+      return i[0]
+    end
+  end
+  return "err:version_not_found"
+end
+
+def i(id, ver, mode, data)
+  if mode == "zip"
+    `#{$dl_tool[1]} #{$gh_mirror_dl}#{find_ver(zip, ver)}`
+    system "unzip ./#{id}.zip -d ./.obsidian/plugins/#{id}"
+    if system "ls ./.obsidian/plugins/#{id}/#{id}/"
+      system "mv -f #{(`ls ./.obsidian/plugins/#{id}/#{id}/`.gsub /^/, "./.obsidian/plugins/#{id}/#{id}/").gsub /\n/, " "} ./.obsidian/plugins/#{id}/ && rm -fd ./.obsidian/plugins/#{id}/#{id}/"
+    end
+    print "installed #{id}-#{ver}\n"
+    return "zip"
+  elsif moed == "js"
+    `#{$dl_tool[1]} #{$gh_mirror_dl}#{find_ver(js, ver)}`
+    system "cp ./main.js ./.obsidian/plugins/#{id}/main.js"
+    if data["json"][0] != nil and find_ver(data["json"], ver) != "err:version_not_found"
+      `#{$dl_tool[1]} #{$gh_mirror_dl}#{find_ver(data["json"], ver)}`
+      system "cp ./manifest.json ./.obsidian/plugins/#{id}/manifest.json"
+    else
+      print "#{id}-#{ver} can not find manifest.json\n"
+    end
+    if data["css"][0] != nil and find_ver(data["css"], ver) != "err:version_not_found"
+      `#{$dl_tool[1]} #{$gh_mirror_dl}#{find_ver(data["css"], ver)}`
+      system "cp ./styles.css ./.obsidian/plugins/#{id}/styles.css"
+    else
+      print "#{id}-#{ver} can not find styles.css\n"
+    end
+    print "installed #{id}-#{ver}\n"
+    return "files"
+  end
+end
+
+def dl(id: "auto", ver: "lastest", mode: "zip", repo: "auto", r: 0, no_check: nil)
+  if repo == "auto"
+    print "finding repo id=#{id}\n"
+    repo = find_repo(id)
+    if repo == "err:repo_not_found"
+      return "err:repo not found"
+    end
+  end
+  if id == "auto" and no_check == nil
+    id = find_id(repo)
+    if repo == "err:id_not_found"
+      return "err:id not found"
+    end
+  end
+  if no_check != nil
+    id = (repo.split "/")[1]
+  end
+  system "#{$dl_tool[0]} #{$gh_mirror_htm}/#{repo}/releases/ -o #{id}-releases.html"
+  html = File.read "./#{id}-releases.html"
+  js = html.scan /<a href="(\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+\/releases\/download\/([0-9]+\.[0-9]+\.[0-9]+)\/main.js)"/
+  json = html.scan /<a href="(\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+\/releases\/download\/([0-9]+\.[0-9]+\.[0-9]+)\/manifest.json)"/
+  css = html.scan /<a href="(\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+\/releases\/download\/([0-9]+\.[0-9]+\.[0-9]+)\/styles.css)"/
+  zip = html.scan /<a href="(\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+\/releases\/download\/([0-9]+\.[0-9]+\.[0-9]+)\/#{id}.zip)"/
+  if ver == "lastest"
+    if js[0] != nil
+      a = js[0][1]
+    else
+      a = "0.0.0"
+    end
+    if zip[0] != nil
+      b = zip[0][1]
+    else
+      b = "0.0.0"
+    end
+    ver = a >= b ? a : b
+  end
+  print "dl start id=#{id} repo=#{repo} ver=#{ver}\n"
+  system "mkdir -p ./.plugin_backup/plugins/#{id}/"
+  system "cp -r ./.obsidian/plugins/#{id}/ ./.plugin_backup/plugins/"
+  system "rm -rf ./.obsidian/plugins/#{id}/"
+  system "mkdir -p ./.obsidian/plugins/#{id}/"
+  system "rm manifest.json*"
+  system "rm main.js*"
+  system "rm *.zip"
+  system "rm styles.css*"
+  datas = { "html" => html, "js" => js, "json" => json, "css" => css }
+  if zip[0] != nil and find_ver(zip, ver) != "err:version_not_found" and mode == "zip"
+    if system "ls ./.obsidian/plugins/#{id}"
+      data = JSON.parse(File.read "./.obsidian/plugins/#{id}/manifest.json")
+      print "#{id}#{data["version"]} is installed,update it?(y/n)"
+      case gets
+      when /[Yy](es)?/
+        i id, ver, "zip", datas
+      when /[Nn]o?/
+        return "quited by user"
+      end
+    else
+      i id, ver, "zip", datas
+    end
+  elsif js[0] != nil and find_ver(js, ver) != "err:version_not_found"
+    install?=`ls ./.obsidian/plugins/#{id}`.chomp!
+    if `ls ./.obsidian/plugins/#{id}`
+      data = JSON.parse(File.read "./.obsidian/plugins/#{id}/manifest.json")
+      print "#{id}#{data["version"]} is installed,update it?(y/n)"
+      case gets
+      when /[Yy](es)?/
+        i id, ver, "zip", datas
+      when /[Nn]o?/
+        return "quited by user"
+      end
+    else
+      i id, ver, "zip", datas
+    end
+  else
+    print "mirror error or not file found\n"
+    if r <= 6
+      dl(id: id, ver: ver, mode: mode, repo: repo, r: (r + 1))
+    end
+  end
+end
+
+def gen_install_list()
+  system %q|mkdir -p ./.plugin_backup/list/|
+  system %q|mv ./obsidian-releases/ ./.plugin_backup/list/#{Time.new().to_s.split(" ")[0]}-plugins.yml|
+  list = `ls ./.obsidian/plugins/`.split "\n"
+  res = Array.new
+  for i in list
+    if i =~ /.*\..*/
+      next
+    end
+    data = JSON.parse(File.read "./.obsidian/plugins/#{i}/manifest.json")
+    res.push [{ "id" => i, "ver" => data["version"] }]
+  end
+  File.write("./plugins.yml", res.to_yaml)
+end
+
+def format_list()
+  res = Array.new
+  repos = Array.new
+  vers = Hash.new
+  system "mkdir .plugin_backup/"
+  system "cp -r ./plugins.yml ./.plugin_backup"
+  list = YAML.load(File.read "./plugins.yml")
+  for i in list
+    if i[0].key? "id"
+      if i[0]["id"] != nil
+        if i[0].key? "ver"
+          if i[0]["ver"] != nil
+            repos = repos | Array[find_repo(i[0]["id"])]
+            vers[find_repo(i[0]["id"])] = i[0]["ver"]
+          end
+        else
+          repos = repos | Array[find_repo(i[0]["id"])]
+          vers[find_repo(i[0]["id"])] = "lastest"
+        end
+      end
+    elsif i[0].key? "repo"
+      if i[0]["repo"] != nil
+        if i[0].key? "ver"
+          if i[0]["ver"] != nil
+            repos = repos | Array[i[0]["repo"]]
+            vers[find_repo(i[0]["id"])] = i[0]["ver"]
+          end
+        else
+          repos = repos | Array[i[0]["repo"]]
+          vers[find_repo(i[0]["id"])] = "lastest"
+        end
+      end
+    end
+  end
+  for i in repos
+    res.push [{ "id" => find_id(i), "repo" => i, "ver" => vers[i.to_s] }]
+  end
+  File.write("./plugins.yml", res.to_yaml)
+end
+
+def install()
+  `mkdir .plugin_backup/ && cp -r ./.obsidian/plugins ./.plugin_backup`
+  installs = YAML.load(File.read "./plugins.yml")
+  p "install start"
+  for i in installs
+    if i[0].key? "id"
+      if i[0]["id"] != nil
+        if i[0].key? "ver"
+          if i[0]["ver"] != nil
+            dl(id: (i[0]["id"]), ver: (i[0]["ver"]))
+          end
+        else
+          dl(id: (i[0]["id"]))
+        end
+      end
+    elsif i[0].key? "repo"
+      if i[0]["repo"] != nil
+        if i[0].key? "ver"
+          if i[0]["ver"] != nil
+            dl(repo: (i[0]["repo"]), ver: (i[0]["ver"]))
+          end
+        else
+          dl(repo: (i[0]["repo"]))
+        end
+      end
+    end
+  end
+end
+
+
+if Dir.entries("./").include? "obsidian-releases" == false
+  get_plugins_list
+end
+case ARGV.first
+when "install"
+  if ARGV[1] != nil
+    dl id: ARGV[1]
+  else
+    install
+  end
+when "list"
+  gen_install_list
+  format_list
+end
